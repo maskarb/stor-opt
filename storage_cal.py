@@ -1,38 +1,61 @@
 import csv
-
 from ast import literal_eval
 
+from tabulate import tabulate
+
+# import gurobipy as g
+
+from lookup_area import els_area
+from lookup_drought_stage import drought_stages as ds
 from lookup_elev import els_stor
 from lookup_stor import stor_els
-from lookup_area import els_area
+
+ACRE_FT_TO_GAL = 325850.943
+ACRE_FT_TO_CF = 43559.9
+
+# m = g.Model() # pylint: disable=E1101
+
+# rel = m.addVar(name='release')
+
 
 def read_csv(file):
     with open(file, 'r', newline='') as f:
         data_reader = csv.reader(f)
         __ = next(data_reader) # remove headers
-        data = [line for line in data_reader]
-    return data
+        ipe_data = [line for line in data_reader]
+    return ipe_data
 
 
 
 def start():
-    data_file, demand_file = 'timeseries_0_0.8.csv', 'reservoir-shift_0.8-ts-0.csv'
-    storage = 131394.5 # assume full lake to start
-    data, demand_all = read_csv(data_file), read_csv(demand_file)
+    table_list = []
+    ts_file, rs_file = 'timeseries_0_0.8.csv', 'reservoir-shift_0.8-ts-0.csv'
+    storage = lookup(251.5, els_stor) # assume full lake to start (el. 251.5 ft, MSL)
+    ipe_data, model_output = read_csv(ts_file), read_csv(rs_file)
     for i in range(600):
         month = get_month(i)
-        inflow, precip, evap = get_ipe(data[i])
-        demand = get_withdrawn(get_demand(demand_all[i]), storage)
-
         days = days_in_month(month)
-        outflow = release(storage, month, days)
-        inflow *= 1.98347 * days
-        precip = get_precip(precip, storage)
-        evap = get_evap(evap, storage)
-        perc_full = storage / 131394.5 * 100
+        if month in [4, 5, 6, 7, 8]: # summer
+            stor_comp = lookup(251.5, els_stor)
+        else:
+            stor_comp = lookup(250.1, els_stor)
 
-        print(f'{month:2d}: {inflow:10.2f}, {precip:10.2f}, {evap:10.2f}, {outflow:10.2f}, {demand:10.2f}, {storage:10.2f}, {perc_full:3.1f}')
+        inflow, precip, evap = get_ipe(ipe_data[i])
+        raw_demand, population = get_dp(model_output[i])
+        demand = get_withdrawn(raw_demand, storage)
+
+        outflow = release(storage, month, days)
+        inflow *= days * 3600*24 / ACRE_FT_TO_CF
+        precip = get_vol_delta(precip, storage)
+        evap = get_vol_delta(evap, storage)
+
+
         storage = storage + inflow + precip - evap - outflow - demand
+        perc_full = storage / stor_comp
+
+        table_list.append([month, inflow, precip, evap, outflow, demand, storage, perc_full])
+    print(tabulate(table_list, headers=['mo', 'inflow', 'precip', 'evap', 'outlow', 'demand', 'storage', '% full'], floatfmt=".2f"))
+
 
 
 def get_month(i):
@@ -44,26 +67,27 @@ def get_month(i):
     return month
 
 def get_ipe(line):
-    data = [literal_eval(val) for val in line[:3]]
-    return data
+    ipe_data = [literal_eval(val) for val in line[:3]]
+    return ipe_data
 
-def get_demand(line):
-    return literal_eval(line[7])
+def get_dp(line):
+    return literal_eval(line[7]), literal_eval(line[13])
 
-def get_precip(precip_in, stor):
-    return lookup(lookup(stor, stor_els), els_area) * (precip_in / 12)
+def get_vol_delta(inches, storage):
+    init_el = lookup(storage, stor_els)
+    final_el = init_el + inches/12
+    return lookup(final_el, els_stor) - storage
 
-def get_evap(evap_in, stor):
-    return lookup(lookup(stor, stor_els), els_area) * (evap_in / 12)
 
 def get_withdrawn(demand, storage):
-    lowestStorage = lookup(236.5, els_stor)
+    lowestStorage = lookup(236.5, els_stor) # top of sediment storage (el. 236.5 ft, MSL)
     remainingWater = storage - lowestStorage
-    actual = 0
     if (remainingWater >= demand):
         actual = demand
     elif (remainingWater > 0):
         actual = remainingWater
+    else:
+        actual = 0
     return actual
 
 def release(storage, month: int, days: int):
@@ -130,13 +154,28 @@ def lookup(num, dic):
     x0, y0 = 0, 0
     val = dic.get(num)
     if val is None:
-        for k, v in dic.items():
-            if num < k:
-                x1, y1 = k, v
-                return (y1 - y0)/(x1 - x0) * (num - x0) + y0
-            x0, y0 = k, v
+        keys = list(dic) # idk why this works
+        x0, x1 = binary_search_iterative(keys, num)
+        y0, y1 = dic[x0], dic[x1]
+        return (y1 - y0)/(x1 - x0) * (num - x0) + y0
     else:
         return val
+
+
+
+def binary_search_iterative(arr, elem):
+    start, end = 0, (len(arr) - 1)
+    while start <= end:
+        mid = (start + end) // 2
+        if elem < arr[mid]:
+            end = mid - 1
+        else:  # elem > arr[mid]
+            start = mid + 1
+    return (arr[mid-1], arr[mid])
+
+
+
+
 
 if __name__ == "__main__":
     start()
