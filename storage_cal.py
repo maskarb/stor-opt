@@ -29,7 +29,7 @@ def read_csv(file):
 
 def start():
     table_list = []
-    ts_file, rs_file = 'timeseries_0_0.8.csv', 'reservoir-shift_0.8-ts-0.csv'
+    ts_file, rs_file = 'timeseries_0_0.2.csv', 'reservoir-shift_0.2-ts-0.csv'
     storage = lookup(251.5, els_stor) # assume full lake to start (el. 251.5 ft, MSL)
     ipe_data, model_output = read_csv(ts_file), read_csv(rs_file)
     for i in range(600):
@@ -150,17 +150,17 @@ def days_in_month(month: int) -> int:
         days = 31
     return days
 
+
 def lookup(num, dic):
     x0, y0 = 0, 0
     val = dic.get(num)
     if val is None:
-        keys = list(dic) # idk why this works
+        keys = list(dic)
         x0, x1 = binary_search_iterative(keys, num)
         y0, y1 = dic[x0], dic[x1]
         return (y1 - y0)/(x1 - x0) * (num - x0) + y0
     else:
         return val
-
 
 
 def binary_search_iterative(arr, elem):
@@ -171,6 +171,8 @@ def binary_search_iterative(arr, elem):
             end = mid - 1
         else:  # elem > arr[mid]
             start = mid + 1
+    if arr[mid] < elem:
+        mid += 1
     return (arr[mid-1], arr[mid])
 
 
