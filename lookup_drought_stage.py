@@ -15,8 +15,8 @@ mo_data = {
 }
 
 drought_stages = {
-    0: 1.00, # gallons per capita per day
-    1: 0.85,
-    2: 0.55,
-    3: 0.40,
+    None: 1.00, # gallons per capita per day
+    0: 0.85,
+    1: 0.55,
+    2: 0.40,
 }

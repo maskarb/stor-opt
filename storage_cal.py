@@ -7,6 +7,7 @@ from tabulate import tabulate
 
 from lookup_area import els_area
 from lookup_drought_stage import drought_stages as ds
+from lookup_drought_stage import mo_data as md
 from lookup_elev import els_stor
 from lookup_stor import stor_els
 
@@ -22,14 +23,21 @@ def read_csv(file):
     with open(file, 'r', newline='') as f:
         data_reader = csv.reader(f)
         __ = next(data_reader) # remove headers
-        ipe_data = [line for line in data_reader]
-    return ipe_data
+        data = [line for line in data_reader]
+    return data
 
+def write_csv(file, data, headers):
+    with open(file, 'w', newline='') as f:
+        data_writer = csv.writer(f, delimiter=',')
+        data_writer.writerow(headers)
+        data_writer.writerows(data)
+    print('write complete.\n')
 
 
 def start():
     table_list = []
-    ts_file, rs_file = 'timeseries_0_0.2.csv', 'reservoir-shift_0.2-ts-0.csv'
+    drought_stages = True
+    ts_file, rs_file, csv_file = 'timeseries_0_0.8.csv', 'reservoir-shift_0.8-ts-0.csv', 'rs-0.8-ts-0-droughts-t.csv'
     storage = lookup(251.5, els_stor) # assume full lake to start (el. 251.5 ft, MSL)
     ipe_data, model_output = read_csv(ts_file), read_csv(rs_file)
     for i in range(600):
@@ -40,9 +48,15 @@ def start():
         else:
             stor_comp = lookup(250.1, els_stor)
 
+        storage0 = storage # previous storage
+        if drought_stages:
+            demand_reduction = get_drought_restriction(month, storage, storage0, stor_comp)
+        else:
+            demand_reduction = 1.00
+
         inflow, precip, evap = get_ipe(ipe_data[i])
         raw_demand, population = get_dp(model_output[i])
-        demand = get_withdrawn(raw_demand, storage)
+        demand = get_withdrawn(raw_demand, storage) * demand_reduction
 
         outflow = release(storage, month, days)
         inflow *= days * 3600*24 / ACRE_FT_TO_CF
@@ -53,9 +67,44 @@ def start():
         storage = storage + inflow + precip - evap - outflow - demand
         perc_full = storage / stor_comp
 
-        table_list.append([month, inflow, precip, evap, outflow, demand, storage, perc_full])
-    print(tabulate(table_list, headers=['mo', 'inflow', 'precip', 'evap', 'outlow', 'demand', 'storage', '% full'], floatfmt=".2f"))
+        table_list.append([month, inflow, precip, evap, outflow, demand, storage, perc_full, demand_reduction])
 
+    headers = ['mo', 'inflow', 'precip', 'evap', 'outlow', 'demand', 'storage', '% full', '% redu']
+    print(tabulate(table_list, headers=headers, floatfmt=".2f"))
+    write_csv(csv_file, table_list, headers)
+
+def get_drought_restriction(month1, level0, level1, level_comp):
+    level0 /= level_comp
+    level1 /= level_comp
+    month0 = get_prev_month(month1)
+    if check_drought(month0, level0) is not None:
+        drought = check_rescission(month1, level1)
+    else:
+        drought = check_drought(month1, level1)
+    return ds[drought]
+
+def get_prev_month(month):
+    if month == 1:
+        month0 = 12
+    else:
+        month0 = month - 1
+    return month0
+
+
+def check_drought(month, level):
+    return check_percentage(month, level, 0)
+
+def check_rescission(month, level):
+    # conservative check. if level == rescission, stays in drought stage
+    return check_percentage(month, level, 1)
+
+def check_percentage(month, level, index):
+    stages = md[month][index]
+    drought_level = None
+    for i, s in enumerate(stages):
+        if level <= s:
+            drought_level = i
+    return drought_level
 
 
 def get_month(i):
