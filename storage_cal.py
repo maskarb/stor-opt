@@ -6,6 +6,10 @@ from lookup_elev import els_stor
 from lookup_stor import stor_els
 from lookup_area import els_area
 
+def start():
+    initial_storage = 131394.5 # assume full lake to start
+    
+
 
 def release(storage, month: int, days: int):
     elevation = lookup(storage, stor_els)
