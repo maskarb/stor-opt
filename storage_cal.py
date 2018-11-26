@@ -3,20 +3,12 @@ from ast import literal_eval
 
 from tabulate import tabulate
 
-# import gurobipy as g
-
+import lookup_constants as c
 from lookup_area import els_area
 from lookup_drought_stage import drought_stages as ds
 from lookup_drought_stage import mo_data as md
 from lookup_elev import els_stor
 from lookup_stor import stor_els
-
-ACRE_FT_TO_GAL = 325850.943
-ACRE_FT_TO_CF = 435560
-
-# m = g.Model() # pylint: disable=E1101
-
-# rel = m.addVar(name='release')
 
 
 def read_csv(file):
@@ -57,13 +49,13 @@ def start():
             demand_reduction = 1.00
 
         inflow, precip, evap = get_ipe(ipe_data[i])
-        raw_demand, population = get_dp(model_output[i])
+        raw_demand, __ = get_dp(model_output[i])
         demand = get_withdrawn(raw_demand, storage) * demand_reduction
         deficit = 100 - (demand / raw_demand * 100)
 
         outflow = release(storage, month, days)
         # outflow = simple_release(storage, month, days)
-        inflow *= days * 3600*24 / ACRE_FT_TO_CF
+        inflow *= days * c.SEC_PER_DAY / c.ACRE_FT_TO_CF
         precip = get_vol_delta(precip, storage)
         evap = get_vol_delta(evap, storage)
 
@@ -74,7 +66,7 @@ def start():
         table_list.append([month, inflow, precip, evap, outflow, demand,
                            storage, perc_full, demand_reduction, deficit])
 
-    headers = ['mo', 'inflow', 'precip', 'evap', 'outlow', 'demand',
+    headers = ['mo', 'inflow', 'precip', 'evap', 'outflow', 'demand',
                'storage', '% full', '% redu', 'deficit']
     print(tabulate(table_list, headers=headers, floatfmt=".2f"))
     write_csv(csv_file, table_list, headers)
@@ -160,8 +152,8 @@ def release(storage, month: int, days: int):
         release_ = min_release_summer
         norm_el = 251.5
         if elevation <= norm_el:
-            storage -= release_ * 3600 * 24 * days / ACRE_FT_TO_CF
-            total_release = release_ * 3600 * 24 * days / ACRE_FT_TO_CF
+            storage -= release_ * c.SEC_PER_DAY * days / c.ACRE_FT_TO_CF
+            total_release = release_ * c.SEC_PER_DAY * days / c.ACRE_FT_TO_CF
         else:
             while (elevation > norm_el and counter < days):
                 if elevation <= 258:
@@ -170,16 +162,16 @@ def release(storage, month: int, days: int):
                     release_ = 4000
                 else:
                     release_ = max_discharge
-                storage -= (release_ * 3600 * 24) / ACRE_FT_TO_CF
+                storage -= (release_ * c.SEC_PER_DAY) / c.ACRE_FT_TO_CF
                 elevation = lookup(storage, stor_els)
                 counter += 1
-                total_release += (release_ * 3600 * 24 / ACRE_FT_TO_CF)
+                total_release += (release_ * c.SEC_PER_DAY / c.ACRE_FT_TO_CF)
     elif (month >= 9 or month <= 3):
         release_ = min_release_winter
         norm_el = 250.1
         if elevation <= norm_el:
-            storage -= release_ * 3600 * 24 * days / ACRE_FT_TO_CF
-            total_release += (release_ * 3600 * 24 * days / ACRE_FT_TO_CF)
+            storage -= release_ * c.SEC_PER_DAY * days / c.ACRE_FT_TO_CF
+            total_release += (release_ * c.SEC_PER_DAY * days / c.ACRE_FT_TO_CF)
         else:
             while (elevation > norm_el and counter < days):
                 if elevation <= 258:
@@ -188,10 +180,10 @@ def release(storage, month: int, days: int):
                     release_ = 2000
                 else:
                     release_ = max_discharge
-                storage -= release_ * 3600 * 24 / ACRE_FT_TO_CF
+                storage -= release_ * c.SEC_PER_DAY / c.ACRE_FT_TO_CF
                 elevation = lookup(storage, stor_els)
                 counter += 1
-                total_release += (release_ * 3600 * 24 / ACRE_FT_TO_CF)
+                total_release += (release_ * c.SEC_PER_DAY / c.ACRE_FT_TO_CF)
     return total_release
 
 
@@ -215,17 +207,17 @@ def release_that_water(norm_el, days, min_, max_, storage):
     counter, total_release = 0, 0
     elevation = lookup(storage, stor_els)
     if elevation <= norm_el:
-        total_release = min_ * 3600 * 24 * days / ACRE_FT_TO_CF
+        total_release = min_ * c.SEC_PER_DAY * days / c.ACRE_FT_TO_CF
     else:
         while elevation > norm_el or counter < days:
             if elevation > norm_el:
                 release = max_
             else:
                 release = min_
-            storage -= (release * 3600 * 24) / ACRE_FT_TO_CF
+            storage -= (release * c.SEC_PER_DAY) / c.ACRE_FT_TO_CF
             elevation = lookup(storage, stor_els)
             counter += 1
-            total_release += (release * 3600 * 24 / ACRE_FT_TO_CF)
+            total_release += (release * c.SEC_PER_DAY / c.ACRE_FT_TO_CF)
     return total_release
 
 def days_in_month(month: int) -> int:
