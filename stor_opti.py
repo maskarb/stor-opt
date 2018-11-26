@@ -5,13 +5,9 @@ from lookup_stor import stor_els as se
 from report import lindo
 from storage_cal import binary_search_iterative, lookup
 
-c.ACRE_FT_TO_CF = 435560
-c.SEC_PER_DAY = 86400
 
 def get_min_release(month):
     return 100 if month in range(4, 9) else 60
-
-
 
 def stickerrythinginafunc(days, month, storage, inflow, precip, evap, demand, drought_stage):
     name = 'ooffff'
@@ -58,28 +54,33 @@ def stickerrythinginafunc(days, month, storage, inflow, precip, evap, demand, dr
         m.addConstr(dem_fac <= 0.45)
 
     m.update()
+    m.setParam('OutputFlag', False)
     m.optimize()
     m.write(name+'.lp')
     lindo(m)
 
-    rel_val = release.X
-    dem_val = demand * dem_fac.X
-    stor_val = stor_init - rel_val - dem_val
+    released = release.X
+    supplied = demand * dem_fac.X
+    stor_val = stor_init - released - supplied
     elevation = lookup(stor_val, se)
 
 
     print()
-    print(f'{elevation:10.2f} {stor_val:10.2f} {dem_val:10.2f} {dem_fac.X:10.2f} {rel_val:10.2f}')
+    print(f'{elevation:10.2f} {stor_val:10.2f} {supplied:10.2f} {dem_fac.X:10.2f} {released:10.2f}')
 
-    return rel_val, dem_val
+    return released, supplied, dem_fac
 
-days = 30
-month = 6
-storage = 135891.3285775884
-demand = 6005.484226694337
-inflow = 4980.411049100027
-precip = 1853.357137054525
-evap = 3772.3573564026738
-drought_stage = 0
+def main():
+    days = 30
+    month = 6
+    storage = 135891.3285775884
+    demand = 6005.484226694337
+    inflow = 4980.411049100027
+    precip = 1853.357137054525
+    evap = 3772.3573564026738
+    drought_stage = 0
 
-stickerrythinginafunc(days, month, storage, inflow, precip, evap, demand, drought_stage)
+    stickerrythinginafunc(days, month, storage, inflow, precip, evap, demand, drought_stage)
+
+if __name__ == "__main__":
+    main()
