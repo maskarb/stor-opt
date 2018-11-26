@@ -49,10 +49,12 @@ def stickerrythinginafunc(days, month, storage, demand, inflow, precip, evap, dr
 
     rel_val = release.X
     dem_val = demand * dem_fac.X
+    stor_val = m.ObjVal + max_storage
+    elevation = lookup(stor_val, se)
 
 
     print()
-    print(f'{dem_val:10.2f} {dem_fac.X:10.2f} {rel_val:10.2f}')
+    print(f'{elevation:10.2f} {stor_val:10.2f} {dem_val:10.2f} {dem_fac.X:10.2f} {rel_val:10.2f}')
 
     return rel_val, dem_val
 
