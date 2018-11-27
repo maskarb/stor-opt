@@ -61,14 +61,14 @@ def stickerrythinginafunc(days, month, storage, inflow, precip, evap, demand, dr
 
     released = release.X
     supplied = demand * dem_fac.X
-    stor_val = stor_init - released - supplied
-    elevation = lookup(stor_val, se)
+    # stor_val = stor_init - released - supplied
+    # elevation = lookup(stor_val, se)
 
 
-    print()
-    print(f'{elevation:10.2f} {stor_val:10.2f} {supplied:10.2f} {dem_fac.X:10.2f} {released:10.2f}')
+    # print()
+    # print(f'{elevation:10.2f} {stor_val:10.2f} {supplied:10.2f} {dem_fac.X:10.2f} {released:10.2f}')
 
-    return released, supplied, dem_fac
+    return released, supplied, dem_fac.X
 
 def main():
     days = 30

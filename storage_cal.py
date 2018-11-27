@@ -1,6 +1,7 @@
 import csv
 from ast import literal_eval
 
+import gurobipy as gu
 from tabulate import tabulate
 
 import lookup_constants as c
@@ -9,7 +10,11 @@ from lookup_drought_stage import drought_stages as ds
 from lookup_drought_stage import mo_data as md
 from lookup_elev import els_stor
 from lookup_stor import stor_els
+from report import lindo
 
+
+def get_min_release(month):
+    return 100 if month in range(4, 9) else 60
 
 def read_csv(file):
     with open(file, 'r', newline='') as f_in:
@@ -29,10 +34,12 @@ def write_csv(file, data, headers):
 def start():
     table_list = []
     drought_stages = False
-    ts_file = 'timeseries_0_0.2.csv'
-    rs_file = 'reservoir-shift_0.2-ts-0.csv'
-    csv_file = 'rs-0.2-ts-0-droughts-f.csv'
+    ts_file = 'timeseries_0_0.8.csv'
+    rs_file = 'reservoir-shift_0.8-ts-0.csv'
+    csv_file = 'rs-0.8-ts-0-droughts-f-opti.csv'
     storage = lookup(251.5, els_stor) # assume full lake to start (el. 251.5 ft, MSL)
+    perc_full = 1
+    storage0 = storage # initialize previous storage
     ipe_data, model_output = read_csv(ts_file), read_csv(rs_file)
     for i in range(600):
         month = get_month(i)
@@ -42,7 +49,7 @@ def start():
         else:
             stor_comp = lookup(250.1, els_stor)
 
-        storage0 = storage # previous storage
+
         if drought_stages:
             demand_reduction = get_drought_restriction(month, storage, storage0, stor_comp)
         else:
@@ -50,24 +57,32 @@ def start():
 
         inflow, precip, evap = get_ipe(ipe_data[i])
         raw_demand, __ = get_dp(model_output[i])
-        demand = get_withdrawn(raw_demand, storage) * demand_reduction
+        demand = get_withdrawn(raw_demand, storage) # * demand_reduction
         deficit = 100 - (demand / raw_demand * 100)
 
-        outflow = release(storage, month, days)
+        # outflow = release(storage, month, days)
         # outflow = simple_release(storage, month, days)
         inflow *= days * c.SEC_PER_DAY / c.ACRE_FT_TO_CF
         precip = get_vol_delta(precip, storage)
         evap = get_vol_delta(evap, storage)
 
 
-        storage = storage + inflow + precip - evap - outflow - demand
+
+        drought_stage = check_drought(month, perc_full)
+        # print(drought_stage)
+        released, supplied, demand_reduction, deficit, boo = stickerrythinginafunc(i, days, month, storage, inflow, precip, evap, raw_demand, drought_stage)
+        if not boo:
+            break
+
+        storage0 = storage # previous storage
+        storage = storage + inflow + precip - evap - released - supplied
         perc_full = storage / stor_comp
 
-        table_list.append([month, inflow, precip, evap, outflow, demand,
-                           storage, perc_full, demand_reduction, deficit])
+        table_list.append([i, month, inflow, precip, evap, released, supplied,
+                           storage, perc_full, drought_stage, demand_reduction, deficit])
 
-    headers = ['mo', 'inflow', 'precip', 'evap', 'outflow', 'demand',
-               'storage', '% full', '% redu', 'deficit']
+    headers = ['step', 'mo', 'inflow', 'precip', 'evap', 'released', 'supplied',
+               'storage', '% full', 'd_stage', '% redu', 'deficit']
     print(tabulate(table_list, headers=headers, floatfmt=".2f"))
     write_csv(csv_file, table_list, headers)
 
@@ -75,7 +90,7 @@ def get_drought_restriction(month1, level0, level1, level_comp):
     level0 /= level_comp
     level1 /= level_comp
     month0 = get_prev_month(month1)
-    if check_drought(month0, level0) is not None:
+    if check_drought(month0, level0) != 0:
         drought = check_rescission(month1, level1)
     else:
         drought = check_drought(month1, level1)
@@ -253,7 +268,66 @@ def binary_search_iterative(arr, elem):
         mid += 1
     return (arr[mid-1], arr[mid])
 
+def stickerrythinginafunc(i, days, month, storage, inflow, precip, evap, demand, drought_stage):
+    name = 'ooffff_' + f'{i:03d}'
+    stor_init = storage + inflow + precip - evap
+    m = gu.Model(name) # pylint: disable=E1101
 
+    min_release = get_min_release(month) * days * c.SEC_PER_DAY / c.ACRE_FT_TO_CF
+    max_release = 8000 * days * c.SEC_PER_DAY / c.ACRE_FT_TO_CF
+
+    release = m.addVar(name="release")
+    dem_fac = m.addVar(name="demand_factor")
+    s1_def = m.addVar(name="s1_def")
+    s1_exs = m.addVar(name="s1_exs")
+    d1_def = m.addVar(name="d1_def")
+
+
+    m.update()
+
+    w = 0.25
+    norm_s1m_d1m = demand / (c.ful_storage - c.min_storage) # eq storage deficit
+    m.setObjective( w*(d1_def/norm_s1m_d1m) + (1 - w)*s1_def, sense=gu.GRB.MINIMIZE) # pylint: disable=E1101
+
+    m.addConstr(dem_fac <= 1.0)
+    m.addConstr(release >= min_release)
+    m.addConstr(release <= max_release)
+    m.addConstr(s1_def <= (c.ful_storage - c.min_storage))
+    m.addConstr(s1_exs <= (c.max_storage - c.ful_storage))
+    m.addConstr(d1_def <= demand)
+
+    m.addConstr(stor_init - release - demand*dem_fac - s1_exs + s1_def + d1_def == c.ful_storage)
+    m.addConstr(demand*dem_fac + d1_def == demand)
+
+    if drought_stage == 0:
+        m.addConstr(dem_fac >= 0.85)
+    elif drought_stage == 1:
+        m.addConstr(dem_fac >= 0.55)
+    elif drought_stage == 2:
+        m.addConstr(dem_fac >= 0.45)
+    elif drought_stage == 3:
+        m.addConstr(dem_fac >= 0.10)
+
+
+    m.update()
+    m.setParam('OutputFlag', False)
+    m.optimize()
+    m.write(name+'.lp')
+    lindo(m)
+
+    released = release.X
+    supplied = demand * dem_fac.X
+    # stor_val = stor_init - released - supplied
+    # elevation = lookup(stor_val, se)
+
+
+    # print()
+    # print(f'{elevation:10.2f} {stor_val:10.2f} {supplied:10.2f} {dem_fac.X:10.2f} {released:10.2f}')
+    boo = True
+    if m.Status != 2:
+        boo = False
+
+    return released, supplied, dem_fac.X, d1_def.X, boo
 
 
 
