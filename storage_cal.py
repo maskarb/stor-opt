@@ -31,16 +31,17 @@ def write_csv(file, data, headers):
     print(file, 'write complete.\n')
 
 
-def start():
+def start(num, w):
     table_list = []
     drought_stages = False
-    ts_file = 'timeseries_0_0.8.csv'
-    rs_file = 'reservoir-shift_0.8-ts-0.csv'
-    csv_file = 'rs-0.8-ts-0-droughts-f-opti.csv'
+    ts_file = f'timeseries_0_0.{num}.csv'
+    rs_file = f'reservoir-shift_0.{num}-ts-0.csv'
+    csv_file = f'rs-0.{num}-ts-0-droughts-f-opti.csv'
     storage = lookup(251.5, els_stor) # assume full lake to start (el. 251.5 ft, MSL)
     perc_full = 1
     storage0 = storage # initialize previous storage
     ipe_data, model_output = read_csv(ts_file), read_csv(rs_file)
+    count, last, def_min_1, sup_min_1 = 0, 0, 0, 0
     for i in range(600):
         month = get_month(i)
         days = days_in_month(month)
@@ -70,10 +71,16 @@ def start():
 
         drought_stage = check_drought(month, perc_full)
         # print(drought_stage)
-        released, supplied, demand_reduction, deficit, boo = stickerrythinginafunc(i, days, month, storage, inflow, precip, evap, raw_demand, drought_stage)
+        released, supplied, demand_reduction, deficit, sup_def, boo = stickerrythinginafunc(i, w, days, month, storage, inflow, precip, evap, raw_demand, drought_stage)
         if not boo:
             break
+        if deficit > 0:
+            count += 1
+        if demand_reduction == 1:
+            last = i
 
+        def_min_1 += deficit
+        sup_min_1 += sup_def
         storage0 = storage # previous storage
         storage = storage + inflow + precip - evap - released - supplied
         perc_full = storage / stor_comp
@@ -83,7 +90,14 @@ def start():
 
     headers = ['step', 'mo', 'inflow', 'precip', 'evap', 'released', 'supplied',
                'storage', '% full', 'd_stage', '% redu', 'deficit']
-    print(tabulate(table_list, headers=headers, floatfmt=".2f"))
+    # print(tabulate(table_list, headers=headers, floatfmt=".2f"))
+    print(f'last 1.00: {last}')
+    print(f'infeasible at timepoint: {i}')
+    print(f'Number deficits: {count}')
+    print(f'Norm deficits: {count / (i+1):.2f}')
+    print()
+    print(f'final deficit: {def_min_1:.1f}')
+    print(f'final storage def: {sup_min_1:.1f}')
     write_csv(csv_file, table_list, headers)
 
 def get_drought_restriction(month1, level0, level1, level_comp):
@@ -268,7 +282,7 @@ def binary_search_iterative(arr, elem):
         mid += 1
     return (arr[mid-1], arr[mid])
 
-def stickerrythinginafunc(i, days, month, storage, inflow, precip, evap, demand, drought_stage):
+def stickerrythinginafunc(i, w, days, month, storage, inflow, precip, evap, demand, drought_stage):
     name = 'ooffff_' + f'{i:03d}'
     stor_init = storage + inflow + precip - evap
     m = gu.Model(name) # pylint: disable=E1101
@@ -285,9 +299,10 @@ def stickerrythinginafunc(i, days, month, storage, inflow, precip, evap, demand,
 
     m.update()
 
-    w = 0.25
+    w = w
     norm_s1m_d1m = demand / (c.ful_storage - c.min_storage) # eq storage deficit
     m.setObjective( w*(d1_def/norm_s1m_d1m) + (1 - w)*s1_def, sense=gu.GRB.MINIMIZE) # pylint: disable=E1101
+    # m.setObjective( d1_def/norm_s1m_d1m , sense=gu.GRB.MINIMIZE) # pylint: disable=E1101
 
     m.addConstr(dem_fac <= 1.0)
     m.addConstr(release >= min_release)
@@ -321,15 +336,20 @@ def stickerrythinginafunc(i, days, month, storage, inflow, precip, evap, demand,
     # elevation = lookup(stor_val, se)
 
 
-    # print()
+    # print(d1_def.X, s1_def.X)
     # print(f'{elevation:10.2f} {stor_val:10.2f} {supplied:10.2f} {dem_fac.X:10.2f} {released:10.2f}')
     boo = True
     if m.Status != 2:
         boo = False
 
-    return released, supplied, dem_fac.X, d1_def.X, boo
+    return released, supplied, dem_fac.X, d1_def.X, s1_def.X, boo
 
 
 
 if __name__ == "__main__":
-    start()
+    lis = [0, 0.001, 0.01, 0.1, 0.17, 0.18, 0.19, 0.2, 0.22, 0.23, 0.25, 0.26, 0.96, 1]
+    for i in lis:
+        print(f'sim for w = {i}')
+        start(8, i)
+
+
